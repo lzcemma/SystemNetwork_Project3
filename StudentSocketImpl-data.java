@@ -1,5 +1,6 @@
 import java.net.*;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.Timer;
 
@@ -49,6 +50,7 @@ class StudentSocketImpl extends BaseSocketImpl {
   private InfiniteBuffer recvBuffer;
 
   private int receivePacketAck;
+
 
 
   StudentSocketImpl(Demultiplexer D) {  // default constructor
@@ -144,7 +146,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
       //only do timers for syns, syn-acks, and fins
       if(inPacket.synFlag || inPacket.finFlag){
-        System.out.println("Creating new TimerTask at state " + stateString(state));
+        System.out.println("Creating new TimerTask for seq" + inPacket.seqNum);
         timerList.put(inPacket.seqNum, createTimerTask(1000, inPacket));
         packetList.put(inPacket.seqNum, inPacket);
       }
@@ -157,7 +159,7 @@ class StudentSocketImpl extends BaseSocketImpl {
           currKey = (Integer)keyList.nextElement();
 
           if(packetList.get(currKey) == inPacket){
-            System.out.println("Recreating TimerTask from state " + stateString(currKey));
+            System.out.println("Recreating TimerTask for seq number " + currKey);
             TCPWrapper.send(inPacket, address);
             timerList.put(currKey,createTimerTask(1000, inPacket));
             break;
@@ -179,15 +181,20 @@ class StudentSocketImpl extends BaseSocketImpl {
   private synchronized void cancelPacketTimer(){
     //must be called before changeToState is called!!!
 
-    if(state != CLOSING){
+    //if(state != CLOSING){
         Enumeration keyList = timerList.keys();
-        Integer currKey = (Integer)keyList.nextElement();
-        while(currKey <= receivePacketAck){
+        while(keyList.hasMoreElements()){
+          Integer currKey = (Integer)keyList.nextElement();
+          if(currKey< receivePacketAck){
             timerList.get(currKey).cancel();
             timerList.remove(currKey);
             packetList.remove(currKey);
-            currKey = (Integer)keyList.nextElement();
+          }
+          else{
+            break;
+          }
         }
+        /*
     }
     else{
       //the only time the state changes before an ack is received... so it must
@@ -195,13 +202,20 @@ class StudentSocketImpl extends BaseSocketImpl {
       timerList.get(receivePacketAck).cancel();
       timerList.remove(receivePacketAck);
       packetList.remove(receivePacketAck);
-    }
+    }*/
   }
 
   /**
    * initialize buffers and set up sequence numbers
    */
   private void initBuffers(){
+
+    //initialize buffers
+    sendBuffer = new InfiniteBuffer();
+    recvBuffer = new InfiniteBuffer();
+
+    //set up sequence numbers
+
   }
 
   /**
@@ -224,6 +238,35 @@ class StudentSocketImpl extends BaseSocketImpl {
    * @param length number of bytes to copy
    */
   synchronized void dataFromApp(byte[] buffer, int length){
+
+    //get evertyhing from app onto the sendBuffer
+    sendBuffer.append(buffer,0,length);
+
+    while (state != ESTABLISHED){
+      try {
+        wait();
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
+
+    //called sendData()
+    sendData(length);
+
+  }
+
+
+  synchronized void sendData(int length){
+
+    byte dataToSend[] = new byte[length];
+    sendBuffer.copyOut(dataToSend, sendBuffer.getBase(),length);
+    sendBuffer.advance(length);
+    System.out.println(Arrays.toString(dataToSend));
+
+
+
+
+
   }
 
 
@@ -256,7 +299,7 @@ class StudentSocketImpl extends BaseSocketImpl {
    */
   public synchronized void receivePacket(TCPPacket p){
     this.notifyAll();
-    receivePacketAck = p.ackNum
+    receivePacketAck = p.ackNum;
     System.out.println("Packet received from address " + p.sourceAddr + " with seqNum " + p.seqNum + "ackNum" + p.ackNum +  "is being processed.");
     System.out.print("The packet is ");
 
@@ -372,6 +415,8 @@ class StudentSocketImpl extends BaseSocketImpl {
     }
     else{
       System.out.println("a chunk of data.");
+      System.out.println(new String(p.data, StandardCharsets.UTF_8));
+
     }
   }
 
